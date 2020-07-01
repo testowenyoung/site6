@@ -140,11 +140,13 @@ jobs:
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/pages`，{
-                mediaType: {
-                  previews: ["switcheroo"],
-                }
-              }).catch(e=>{
-              console.error('error',e)
-            });
+            github.request(`GET /repos/:owner/:repo/pages`,{
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            }).then(data=>{
+              console.log('data',data)
+            }).catch((e)=>{
+              console.log('e',e)
+            })
+
   
