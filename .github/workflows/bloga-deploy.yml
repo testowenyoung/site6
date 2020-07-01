@@ -140,7 +140,11 @@ jobs:
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/pages`).catch(e=>{
+            github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/pages`，{
+                mediaType: {
+                  previews: ["switcheroo"],
+                }
+              }).catch(e=>{
               console.error('error',e)
             });
   
