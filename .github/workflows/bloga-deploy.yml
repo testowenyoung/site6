@@ -1,0 +1,150 @@
+name: Deploy
+on:
+  push:
+  repository_dispatch:
+    types: [redeploy]
+env:
+  AUTH1_CLIENT_ID: ${{ secrets.AUTH1_CLIENT_ID }}
+  AUTH1_CLIENT_SECRET: ${{ secrets.AUTH1_CLIENT_SECRET }}
+  BLOGA_SITE_CONFIG_URL: ${{ secrets.BLOGA_SITE_CONFIG_URL }}
+  SSH_DEPLOY_KEY: ${{secrets.SSH_DEPLOY_KEY }}
+jobs:
+  init:
+    runs-on: ubuntu-latest
+    # outpus result type is string, true will be "true"
+    outputs:
+      isFirstCommit: ${{ (github.event.commits[0].message == 'Initial commit') && (github.run_number == 1) }}
+      repositoryName: ${{ steps.repositoryName.outputs.result}}
+      sourceBranch: ${{ steps.sourceBranch.outputs.result }}
+      deployBranch: ${{ steps.deployBranch.outputs.result }}
+      isSourceBranch: ${{ steps.isSourceBranch.outputs.result }}
+    steps:
+      - id: repositoryName
+        uses: actions/github-script@v2
+        with:
+          script: return context.repo.repo
+          result-encoding: string
+      - id: sourceBranch
+        uses: actions/github-script@v2
+        with:
+          script: |
+            if(context.repo.repo === `${context.repo.owner}.github.io`){
+              return 'source'
+            }else{
+              return 'master'
+            }
+          result-encoding: string
+      - id: deployBranch
+        uses: actions/github-script@v2
+        with:
+          script: |
+            if(context.repo.repo === `${context.repo.owner}.github.io`){
+              return 'master'
+            }else{
+              return 'gh-pages'
+            }
+          result-encoding: string
+      - id: isSourceBranch
+        uses: actions/github-script@v2
+        env:
+          SOURCE_BRANCH: ${{ steps.sourceBranch.outputs.result }}
+        with:
+          script: |
+            if(`refs/heads/${process.env.SOURCE_BRANCH}` === context.ref){
+              return true
+            }else{
+              return false
+            }
+  
+  build:
+    needs: init
+    runs-on: ubuntu-latest
+    name: Build
+    if:  (needs.init.outputs.isFirstCommit=='false')  && (needs.init.outputs.isSourceBranch=='true')
+    steps:
+      - name: Dump INIT_OUTPUTS
+        run: echo $INIT_OUTPUTS 
+        env:
+          INIT_OUTPUTS: ${{ toJson(needs.init.outputs) }}
+      - name: check param
+        if: (!env.SSH_DEPLOY_KEY)
+        run: exit 1
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Get gatsby cache key from last build
+        id: get-gatsby-latest-cache-key-file
+        uses: actions/checkout@v2
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: .bloga-last-build
+      - name: Get gatsby-latest-cache-key content
+        if: ${{ steps.get-gatsby-latest-cache-key-file.outcome == 'success' }}
+        id: gatsby-latest-cache-key
+        run: echo "::set-output name=key::$(cat .bloga-last-build/_gatsby-latest-cache-key.txt)"  
+      - name: Get yarn cache directory
+        id: yarn-cache-dir
+        run: echo "::set-output name=dir::$(yarn cache dir)"
+      - name: Gatsby cache directory restore
+        uses: actions/cache@v2
+        if: ${{ steps.gatsby-latest-cache-key.outcome == 'success' }}
+        with:
+          key: ${{ runner.os }}-${{ steps.gatsby-latest-cache-key.outputs.key }}
+          path: |
+            .cache
+            public
+      - name: Yarn cache
+        uses: actions/cache@v2
+        with:
+          path: ${{ steps.yarn-cache-dir.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Yarn install
+        run: 'yarn --pure-lockfile'
+      - name: Build app
+        run: yarn build
+      - name: Get gatsby latest cache folder hash
+        id: gatsby-latest-cache-hash
+        uses: theowenyoung/folder-hash@v2.0.1
+        with:
+          path: |
+            .cache
+            public
+      - name: Save gatsby cache directory
+        uses: actions/cache@v2
+        with:
+          key: ${{ runner.os }}-gatsby-cache-directory-${{ steps.gatsby-latest-cache-hash.outputs.hash}}
+          path: |
+            .cache
+            public
+      - name: Save cache key to file
+        run: echo gatsby-cache-directory-${{ steps.gatsby-latest-cache-hash.outputs.hash}} > public/_gatsby-latest-cache-key.txt
+      - uses: actions/upload-artifact@v2
+        with:
+          name: gatsby-latest-cache-key
+          path: public/_gatsby-latest-cache-key.txt
+      - name: Deploy
+        uses: peaceiris/actions-gh-pages@v3.6.1
+        with:
+          deploy_key: ${{ secrets.SSH_DEPLOY_KEY }}
+          publish_dir: ./public
+          publish_branch: ${{ needs.init.outputs.deployBranch }}
+          user_name: "github-actions[bot]"
+          user_email: "github-actions[bot]@users.noreply.github.com"
+      - name: Trigger the site build
+        uses: actions/github-script@v2
+        env:
+          DEPLOY_BRANCH: ${{ needs.init.outputs.deployBranch }}
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            github.repos.createPagesSite({
+                          owner: context.repo.owner,
+                          repo: context.repo.repo,
+                          })
+                        .catch(e=>{
+                          console.error('error',e)
+                        })
+  
