@@ -140,11 +140,7 @@ jobs:
         with:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
-            github.repos.createPagesSite({
-                          owner: context.repo.owner,
-                          repo: context.repo.repo,
-                          })
-                        .catch(e=>{
-                          console.error('error',e)
-                        })
+            github.request(`POST /repos/${context.repo.owner}/${context.repo.repo}/pages`).catch(e=>{
+              console.error('error',e)
+            });
   
